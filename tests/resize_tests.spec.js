@@ -7,21 +7,25 @@ const fs = require('fs');
     const browser = await puppeteer.launch({
         headless: false, 
         slowMo: 100,    
-        args: ['--start-maximized', '--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--start-maximized',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-features=IsolateOrigins,site-per-process'
+        ]
     });
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
+    await page.setBypassCSP(true);
 
-    // CRITICAL: Set download behavior immediately after page creation
-    const downloadPath = path.resolve('./downloads');
-    if (!fs.existsSync(downloadPath)) {
-        fs.mkdirSync(downloadPath);
-    }
+    const downloadPath = path.resolve(process.cwd(), 'downloads');
+    if (!fs.existsSync(downloadPath)) fs.mkdirSync(downloadPath);
 
-    await page._client().send('Page.setDownloadBehavior', {
+    const client = await page.target().createCDPSession();
+    await client.send('Page.setDownloadBehavior', {
         behavior: 'allow',
-        downloadPath: downloadPath,
+        downloadPath,
     });
 
     async function waitForNewDownload(initialFiles, timeoutMs = 30000) {
@@ -73,12 +77,9 @@ const fs = require('fs');
                 const downloadBtn = buttons.find(b => b.innerText.includes('Download'));
                 if (downloadBtn) downloadBtn.click();
             }),
-            new Promise(resolve => setTimeout(resolve, 10000))
+            new Promise(resolve => setTimeout(resolve, 15000))
         ]);
-        console.log("Download button clicked! Waiting for network idle...");
-
-        // Wait for network idle to ensure data transfer completes
-        await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
+        console.log("Download button clicked! Waiting for file to finish...");
 
         const downloadedFiles = await waitForNewDownload(beforeFiles, 30000);
         console.log("Download completed. Files in folder:", downloadedFiles);
