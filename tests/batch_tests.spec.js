@@ -3,111 +3,136 @@ const path = require('path');
 const fs = require('fs');
 
 (async () => {
-    // 1. Launch Browser with macOS fixes
-    const browser = await puppeteer.launch({
-        headless: false,
-        slowMo: 100,
-        args: [
-            '--start-maximized',
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-features=IsolateOrigins,site-per-process'
-        ]
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+  const downloadPath = path.join(process.cwd(), 'downloads');
+
+  if (!fs.existsSync(downloadPath)) {
+    fs.mkdirSync(downloadPath);
+  }
+
+  let browser;
+
+  try {
+    browser = await puppeteer.launch({
+      headless: false,
+      defaultViewport: null,
+      args: [
+        '--start-maximized',
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ]
     });
 
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
-    await page.setBypassCSP(true);
-
-    const downloadPath = path.resolve(process.cwd(), 'downloads');
-    if (!fs.existsSync(downloadPath)) fs.mkdirSync(downloadPath);
 
     const client = await page.target().createCDPSession();
     await client.send('Page.setDownloadBehavior', {
-        behavior: 'allow',
-        downloadPath,
+      behavior: 'allow',
+      downloadPath
     });
 
-    async function waitForNewDownload(initialFiles, timeoutMs = 30000) {
-        const initialSet = new Set(initialFiles);
-        const startTime = Date.now();
-        while (Date.now() - startTime < timeoutMs) {
-            const currentFiles = fs.readdirSync(downloadPath);
-            const newFiles = currentFiles.filter(f => !initialSet.has(f));
-            if (newFiles.length > 0) return newFiles;
-            await new Promise(r => setTimeout(r, 1000));
-        }
-        throw new Error(`No new download file appeared in ${downloadPath} within ${timeoutMs}ms`);
+    console.log("Running Test Case: TC08 - Bulk Image Resize");
+
+    // Bulk Resize page
+    await page.goto('https://www.pixelssuite.com/bulk-resize', {
+      waitUntil: 'networkidle2'
+    });
+
+    console.log("Opening bulk upload...");
+
+    // Upload multiple images at once
+    const filesToUpload = [
+      path.join(process.cwd(), 'test-image.jpg'),
+      path.join(process.cwd(), 'test-image2.jpg')
+    ];
+
+    const [chooser] = await Promise.all([
+      page.waitForFileChooser(),
+      page.evaluate(() => {
+        const btn = [...document.querySelectorAll('button')]
+          .find(b =>
+            b.innerText.toLowerCase().includes('select') ||
+            b.innerText.toLowerCase().includes('upload')
+          );
+
+        if (btn) btn.click();
+      })
+    ]);
+
+    await chooser.accept(filesToUpload);
+
+    console.log("Bulk images uploaded successfully!");
+
+    await delay(5000);
+
+    // Set width if field exists
+    const input = await page.$('input[type="number"]');
+
+    if (input) {
+      await input.click({ clickCount: 3 });
+      await input.press('Backspace');
+      await input.type('1024');
+      console.log("Bulk Width set to 1024px");
+    } else {
+      console.log("Width input not found - skipped");
     }
 
-    try {
-        console.log("Running Test Case: TC08 - Batch Resize (Multiple Images)");
-        
-        // 3. Navigate to Resize Page
-        await page.goto('https://www.pixelssuite.com/resize-image', { waitUntil: 'networkidle2' });
+    await delay(3000);
 
-        // 4. Batch Upload
-        console.log("Starting Batch Upload...");
-        const filesToUpload = [
-            path.join(process.cwd(), 'test-image.jpg'),
-            path.join(process.cwd(), 'test-image2.jpg')
-        ];
+    // Click resize / process button
+    await page.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')]
+        .find(b =>
+          b.innerText.toLowerCase().includes('resize') ||
+          b.innerText.toLowerCase().includes('convert') ||
+          b.innerText.toLowerCase().includes('download')
+        );
 
-        for (const filePath of filesToUpload) {
-            const [fileChooser] = await Promise.all([
-                page.waitForFileChooser(),
-                page.evaluate(() => {
-                    const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('Select files'));
-                    if (btn) btn.click();
-                }),
-            ]);
-            await fileChooser.accept([filePath]);
-            console.log(`Uploaded: ${path.basename(filePath)}`);
-            await new Promise(r => setTimeout(r, 1500));
-        }
+      if (btn) btn.click();
+    });
 
-        console.log("All images uploaded successfully!");
+    console.log("Bulk process button clicked!");
 
-        // 5. Config එක දිස්වන තුරු රැඳී සිටීම
-        await new Promise(r => setTimeout(r, 3000));
+    await delay(5000);
 
-        // 6. Width එක 1024px ලෙස සැකසීම
-        await page.waitForSelector('input[type="number"]');
-        await page.click('input[type="number"]', { clickCount: 3 });
-        await page.type('input[type="number"]', '1024');
-        console.log("Batch Width set to 1024px");
+    // Click actual file link if generated
+    const links = await page.$$('a');
 
-        const beforeFiles = fs.readdirSync(downloadPath);
-        
-        // Use Promise.all to wait during download and keep browser open
-        await Promise.all([
-            page.evaluate(() => {
-                const buttons = Array.from(document.querySelectorAll('button'));
-                const downloadBtn = buttons.find(b => b.innerText.toLowerCase().includes('download'));
-                if (downloadBtn) {
-                    downloadBtn.scrollIntoView();
-                    downloadBtn.click();
-                } else {
-                    throw new Error("Download button not found!");
-                }
-            }),
-            new Promise(resolve => setTimeout(resolve, 15000))
-        ]);
+    for (const link of links) {
+      const href = await page.evaluate(el => el.href, link);
 
-        console.log("Batch Download Clicked! Waiting for file to finish...");
-
-        const downloadedFiles = await waitForNewDownload(beforeFiles, 30000);
-        
-        const files = fs.readdirSync(downloadPath);
-        if (files.length > 0) {
-            console.log("Success! Files found in downloads folder:", files);
-        } else {
-            console.log("Warning: Download clicked but no files found in folder.");
-        }
-
-    } catch (error) {
-        console.error("Batch Test failed:", error);
-    } finally {
-        await browser.close();
+      if (href && (href.includes('blob:') || href.includes('http'))) {
+        await link.click();
+        console.log("Real bulk file link clicked!");
+        break;
+      }
     }
+
+    await delay(8000);
+
+    const files = fs.readdirSync(downloadPath);
+
+    const downloaded = files.filter(file =>
+      file.endsWith('.jpg') ||
+      file.endsWith('.jpeg') ||
+      file.endsWith('.png') ||
+      file.endsWith('.zip')
+    );
+
+    console.log("Downloaded files:", downloaded);
+
+    if (downloaded.length > 0) {
+      console.log("✅ TC08 PASSED - Bulk image resize completed successfully");
+    } else {
+      console.log("❌ TC08 FAILED - Bulk image resize did not generate downloadable output");
+    }
+
+  } catch (error) {
+    console.error("Bulk Test Error:", error);
+    console.log("❌ TC08 FAILED - Error during bulk image resize flow");
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
 })();

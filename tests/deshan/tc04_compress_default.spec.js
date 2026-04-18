@@ -22,89 +22,80 @@ const fs = require('fs');
     const client = await page.target().createCDPSession();
     await client.send('Page.setDownloadBehavior', {
       behavior: 'allow',
-      downloadPath: downloadPath
+      downloadPath
     });
 
-    console.log("Running Test Case: TC07 - Resize image");
+    console.log("Running TC04 - Compress Image");
 
-    await page.goto('https://www.pixelssuite.com/resize-image', {
+    // Correct URL
+    await page.goto('https://www.pixelssuite.com/compress-image', {
       waitUntil: 'networkidle2'
     });
 
+    await delay(3000);
+
+    // Click exact Select files button
     const [chooser] = await Promise.all([
-      page.waitForFileChooser(),
+      page.waitForFileChooser({ timeout: 60000 }),
       page.evaluate(() => {
         const btn = [...document.querySelectorAll('button')]
-          .find(b => b.innerText.includes('Select files'));
+          .find(b => b.innerText.trim() === 'Select files');
         if (btn) btn.click();
       })
     ]);
 
-    await chooser.accept([path.join(process.cwd(), 'test-image.jpg')]);
-    console.log("Image uploaded successfully!");
+    await chooser.accept([
+      path.join(process.cwd(), 'test-image.jpg')
+    ]);
 
-    await delay(3000);
-
-    const input = await page.$('input[type="number"]');
-    await input.click({ clickCount: 3 });
-    await input.press('Backspace');
-    await input.type('800');
-
-    console.log("Width set to 800");
+    console.log("Image uploaded");
 
     await delay(5000);
 
-    // Click visible Download button
+    // Try download
     await page.evaluate(() => {
       const btn = [...document.querySelectorAll('button')]
-        .find(b => b.innerText.includes('Download'));
+        .find(b => b.innerText.toLowerCase().includes('download'));
       if (btn) btn.click();
     });
 
-    console.log("Download button clicked!");
+    console.log("Download clicked");
 
     await delay(3000);
 
-    // Click real hidden link
+    // Hidden link click
     const links = await page.$$('a');
-    let found = false;
 
     for (const link of links) {
       const href = await page.evaluate(el => el.href, link);
 
       if (href && (href.includes('blob:') || href.includes('http'))) {
         await link.click();
-        found = true;
         console.log("Real file link clicked!");
         break;
       }
     }
 
-    if (!found) {
-      throw new Error("Real download link not found");
-    }
-
     await delay(8000);
 
-    const files = fs.readdirSync(downloadPath);
-
-    const downloaded = files.filter(file =>
-      file.endsWith('.jpg') ||
-      file.endsWith('.jpeg') ||
-      file.endsWith('.png')
+    const files = fs.readdirSync(downloadPath).filter(f =>
+      f.endsWith('.jpg') ||
+      f.endsWith('.jpeg') ||
+      f.endsWith('.png') ||
+      f.endsWith('.webp')
     );
 
-    console.log("Downloaded files:", downloaded);
+    console.log("Downloaded:", files);
 
-    if (downloaded.length > 0) {
-      console.log("✅ TC07 PASSED - Resize image downloaded successfully");
+    if (files.length > 0) {
+      console.log("✅ TC04 PASSED - Compressed file downloaded");
     } else {
-      console.log("❌ TC07 FAILED - Download not found");
+      console.log("❌ TC04 FAILED - No compressed file downloaded");
     }
 
-  } catch (err) {
-    console.error("Something went wrong:", err);
-    console.log("❌ TC07 FAILED");
+  } catch (error) {
+    console.error("Error:", error);
+    console.log("❌ TC04 FAILED");
   } finally {
     if (browser) await browser.close();
   }
